@@ -98,6 +98,92 @@ type PowerUser = Omit<User, 'type'> &
 
 ```ts
 // index.ts
+/**
+  这个题目太长了，比较占地方，大家就点击上方的链接查看吧，这里我只贴出来题目要求：
+  删除UsersApiResponse和AdminsApiResponse类型，并使用通用类型ApiResponse来为每一个API函数指定响应的格式
+*/
+export type ApiResponse<T> = unknown
+```
+
+##### 解答
+
+我们可以先看下题目中的响应数据的格式
+
+```ts
+type AdminsApiResponse =
+  | {
+      status: 'success'
+      data: Admin[]
+    }
+  | {
+      status: 'error'
+      error: string
+    }
+type UsersApiResponse =
+  | {
+      status: 'success'
+      data: User[]
+    }
+  | {
+      status: 'error'
+      error: string
+    }
+```
+
+每个响应数据都有成功和失败的状态，成功时返回的是 data，失败时返回的是 error，error 的类型都是 string，只有 data 不一样。
+
+按照题目的要求，我们需要写一个通用的类型，这里我们可以用泛型来进行重构：
+
+```ts
+export type ApiResponse<T> =
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: string }
+```
+
+使用的时候只需要传入泛型就可以了：
+
+```ts
+export function requestAdmins(
+  callback: (response: ApiResponse<Admin[]>) => void
+) {
+  callback({
+    status: 'success',
+    data: admins
+  })
+}
+```
+
+其他函数同理，也是这样改造。
+
+前面几道题都是比较简单的，下面我们看下稍微复杂点的题目。
+
+#### exercises-10
+
+##### GitHub 地址：[exercises-10](https://github.com/typescript-exercises/typescript-exercises/tree/master/src/exercises/10)
+
+##### 题目
+
+```ts
+// index.ts
+/**
+具体题目点击上方链接可以看到，这里只贴出来题目要求：
+  Exercise:
+    我们不想重新实现所有的数据请求功能。
+    让我们装饰一下旧的基于回调的函数，
+    其结果与promise兼容。
+    函数最终应返回一个promise，这个promise会resolve最终的数据或reject一个error，
+
+    函数名为promisify
+
+    更高难度的练习:
+
+    创建一个函数promisifyAll，
+    它接受带有函数的对象，
+    并返回一个新对象，
+    其中每个函数都是promised的。
+
+    const api = promisifyAll(oldApi);
+*/
 ```
 
 ```ts
