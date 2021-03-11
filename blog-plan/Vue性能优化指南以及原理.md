@@ -270,6 +270,88 @@ el.style.display = value ? el.__vOriginalDisplay : 'none'
 
 它其实是通过切换元素的 display 属性来控制的，和 v-if 相比，不需要在 patch 阶段创建/移除节点，只是根据`v-show`上绑定的值来控制 DOM 元素的`style.display`属性，在频繁切换的场景下就可以节省很多性能。
 
-但是并不是说`v-show`可以在任何情况下都替换`v-if`，如果初始值是`false`时，`v-if`并不会创建隐藏的节点，但是`v-show`会创建，并通过设置`style.display='none'`来隐藏，虽然外表看上去这个DOM都是被隐藏的，但是`v-show`已经完整的走了一遍创建的流程，造成了性能的浪费。
+但是并不是说`v-show`可以在任何情况下都替换`v-if`，如果初始值是`false`时，`v-if`并不会创建隐藏的节点，但是`v-show`会创建，并通过设置`style.display='none'`来隐藏，虽然外表看上去这个 DOM 都是被隐藏的，但是`v-show`已经完整的走了一遍创建的流程，造成了性能的浪费。
 
-所以，`v-if`的优势体现在初始化时，`v-show`体现在更新时，当然并不是要求你绝对按照这个方式来，比如某些组件初始化时会请求数据，而你想先隐藏组件，然后在显示时能立刻看到数据，这时候就可以用`v-show`，又或者你想每次显示这个组件时都是最新的数据，那么你就可以用`v-if`，所以我们要结合具体业务场景，来选一个合适的方式。
+所以，`v-if`的优势体现在初始化时，`v-show`体现在更新时，当然并不是要求你绝对按照这个方式来，比如某些组件初始化时会请求数据，而你想先隐藏组件，然后在显示时能立刻看到数据，这时候就可以用`v-show`，又或者你想每次显示这个组件时都是最新的数据，那么你就可以用`v-if`，所以我们要结合具体业务场景去选一个合适的方式。
+
+### 使用 keep-alive
+
+在动态组件的场景下：
+
+```html
+<template>
+  <div>
+    <component :is="currentComponent" />
+  </div>
+</template>
+```
+
+这个时候有多个组件来回切换，`currentComponent`每变一次，相关的组件就会销毁/创建一次，如果这些组件比较复杂的话，就会造成一定的性能压力，其实我们可以使用 keep-alive 将这些组件缓存起来：
+
+```html
+<template>
+  <div>
+    <keep-alive>
+      <component :is="currentComponent" />
+    </keep-alive>
+  </div>
+</template>
+```
+
+`keep-alive`的作用就是将它包裹的组件在第一次渲染后就缓存起来，下次需要时就直接从缓存里面取，避免了不必要的性能浪费，在讨论上个问题时，说的是`v-show`初始时性能压力大，因为它要创建所有的组件，其实可以用`keep-alive`优化下：
+
+```js
+<template>
+  <div>
+    <keep-alive>
+      <UserProfileA v-if="visible" />
+      <UserProfileB v-else />
+    </keep-alive>
+  </div>
+</template>
+```
+
+这样的话，初始化时不会渲染`UserProfileB`组件，当切换`visible`时，才会渲染`UserProfileB`组件，同时被`keep-alive`缓存下来，频繁切换时，由于是直接从缓存中取，所以会节省很多性能，所以这种方式在初始化和更新时都有较好的性能。
+
+但是`keep-alive`并不是没有缺点，组件被缓存时会占用内存，属于空间和时间上的取舍，在实际开发中要根据场景选择合适的方式。
+
+### 避免 v-for 和 v-if 同时使用
+
+这一点是 Vue 官方的风格指南中明确指出的一点：[Vue 风格指南](https://cn.vuejs.org/v2/style-guide/#%E9%81%BF%E5%85%8D-v-if-%E5%92%8C-v-for-%E7%94%A8%E5%9C%A8%E4%B8%80%E8%B5%B7%E5%BF%85%E8%A6%81)
+
+如以下模板：
+
+```html
+<ul>
+  <li v-for="user in users" v-if="user.isActive" :key="user.id">
+    {{ user.name }}
+  </li>
+</ul>
+```
+
+会被编译成：
+
+```js
+// 简化版
+function render() {
+  return _c(
+    'ul',
+    this.users.map((user) => {
+      return user.isActive
+        ? _c(
+            'li',
+            {
+              key: user.id
+            },
+            [_v(_s(user.name))]
+          )
+        : _e()
+    }),
+    0
+  )
+}
+```
+
+可以看到，这里是先遍历（v-for），再判断（v-if），这里有个问题就是：如果你有一万条数据，其中只有 100 条是`isActive`状态的，你只希望显示这100条，但是实际在渲染时，每一次渲染，这一万条数据都会被遍历一遍。比如你在这个组件内的其他地方改变了某个响应式数据时，会触发重新渲染，调用渲染函数，调用渲染函数时，就会执行到上面的代码，从而将这一万条数据遍历一遍，即使你的`users`没有发生任何改变。
+
+为了避免这种性能损失，我们可以用计算属性代替：
