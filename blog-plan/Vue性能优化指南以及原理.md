@@ -1,3 +1,10 @@
+### 前言
+
+我们在使用 Vue 或其他框架的日常开发中，或多或少的都会遇到一些性能问题，尽管 Vue 内部已经帮助我们做了许多优化，但是还是有些问题是需要我们主动去避免的，我在我的日常开中，以及网上各种大佬的文章中总结了一些容易产生性能问题的场景以及针对这些问题优化的技巧，这篇文章就来探讨下，希望对你有所帮助。
+
+指引
+如何检测性能
+
 ### 使用`v-slot:slotName`，而不是`slot="slotName"`
 
 `v-slot`是 2.6 新增的语法，具体可查看:[Vue2.6](https://zhuanlan.zhihu.com/p/56260917)，虽然 2.6 发布已经是快两年前的事情了，但是现在仍然有不少人仍然在使用`slot="slotName"`这个语法，虽然这两个语法都能达到相同的效果，但是内部的逻辑确实不一样的，我们先来看下这两种语法分别会被编译成什么：
@@ -88,12 +95,6 @@ function render() {
         }
         return superCount
       }
-    },
-    created() {
-      console.log(this.superCount)
-    },
-    mounted() {
-      console.log(this.superCount)
     }
   }
 </script>
@@ -379,4 +380,352 @@ function render() {
 
 这样只会在`users`发生改变时才会执行这段遍历的逻辑，和之前相比，避免了不必要的性能浪费。
 
-### 不要将index作为v-for的key
+### 始终为 v-for 添加 key，并且不要将 index 作为的 key
+
+这一点是[Vue 风格指南](https://cn.vuejs.org/v2/style-guide/#%E4%B8%BA-v-for-%E8%AE%BE%E7%BD%AE%E9%94%AE%E5%80%BC%E5%BF%85%E8%A6%81)中明确指出的一点，同时也是面试时常问的一点，很多人都习惯的将 index 作为 key，这样其实是不太好的，index 作为 key 时，将会让 diff 算法产生错误的判断，从而带来一些性能问题，你可以看下[ssh](https://juejin.cn/user/2330620350708823)大佬的文章，深入分析下，[为什么 Vue 中不要用 index 作为 key](https://juejin.cn/post/6844904113587634184#heading-3)。在这里我也通过一个例子来简单说明下当 index 作为 key 时是如何影响性能的。
+
+看下这个例子：
+
+```js
+const Item = {
+  name: 'Item',
+  props: ['message', 'color'],
+  render(h) {
+    debugger
+    console.log('执行了Item的render')
+    return h('div', { style: { color: this.color } }, [this.message])
+  }
+}
+
+new Vue({
+  name: 'Parent',
+  template: `
+  <div @click="reverse" class="list">
+    <Item
+      v-for="(item,index) in list"
+      :key="item.id"
+      :message="item.message"
+      :color="item.color"
+    />
+  </div>`,
+  components: { Item },
+  data() {
+    return {
+      list: [
+        { id: 'a', color: '#f00', message: 'a' },
+        { id: 'b', color: '#0f0', message: 'b' }
+      ]
+    }
+  },
+  methods: {
+    reverse() {
+      this.list.reverse()
+    }
+  }
+}).$mount('#app')
+```
+
+这里有一个 list，会渲染出来`a b`，点击后会执行`reverse`方法将这个 list 颠倒下顺序，你可以将这个例子复制下来，在自己的电脑上看下效果。
+
+我们先来分析用`id`作为 key 时，点击时会发生什么，
+
+由于 list 发生了改变，会触发`Parent`组件的重新渲染，拿到新的`vnode`，和旧的`vnode`去执行`patch`，我们主要关心的就是`patch`过程中的`updateChildren`逻辑，`updateChildren`就是对新旧两个`children`执行`diff`算法，使尽可能地对节点进行复用，对于我们这个例子而言，此时`旧的children`是：
+
+```js
+;[
+  {
+    tag: 'Item',
+    key: 'a',
+    propsData: {
+      color: '#f00',
+      message: '红色'
+    }
+  },
+  {
+    tag: 'Item',
+    key: 'b',
+    propsData: {
+      color: '#0f0',
+      message: '绿色'
+    }
+  }
+]
+```
+
+执行`reverse`后的`新的children`是：
+
+```js
+;[
+  {
+    tag: 'Item',
+    key: 'b',
+    propsData: {
+      color: '#0f0',
+      message: '绿色'
+    }
+  },
+  {
+    tag: 'Item',
+    key: 'a',
+    propsData: {
+      color: '#f00',
+      message: '红色'
+    }
+  }
+]
+```
+
+此时执行`updateChildren`，`updateChildren`会对新旧两组 children 节点的循环进行对比：
+
+```js
+while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
+  if (isUndef(oldStartVnode)) {
+    oldStartVnode = oldCh[++oldStartIdx] // Vnode has been moved left
+  } else if (isUndef(oldEndVnode)) {
+    oldEndVnode = oldCh[--oldEndIdx]
+  } else if (sameVnode(oldStartVnode, newStartVnode)) {
+    // 对新旧节点执行patchVnode
+    // 移动指针
+  } else if (sameVnode(oldEndVnode, newEndVnode)) {
+    // 对新旧节点执行patchVnode
+    // 移动指针
+  } else if (sameVnode(oldStartVnode, newEndVnode)) {
+    // 对新旧节点执行patchVnode
+    // 移动oldStartVnode节点
+    // 移动指针
+  } else if (sameVnode(oldEndVnode, newStartVnode)) {
+    // 对新旧节点执行patchVnode
+    // 移动oldEndVnode节点
+    // 移动指针
+  } else {
+    //...
+  }
+}
+```
+
+通过`sameVnode`判断两个节点是相同节点的话，就会执行相应的逻辑：
+
+```js
+function sameVnode(a, b) {
+  return (
+    a.key === b.key &&
+    ((a.tag === b.tag &&
+      a.isComment === b.isComment &&
+      isDef(a.data) === isDef(b.data) &&
+      sameInputType(a, b)) ||
+      (isTrue(a.isAsyncPlaceholder) &&
+        a.asyncFactory === b.asyncFactory &&
+        isUndef(b.asyncFactory.error)))
+  )
+}
+```
+
+`sameVnode`主要就是通过 key 去判断，由于我们颠倒了 list 的顺序，所以第一轮对比中：`sameVnode(oldStartVnode, newEndVnode)`成立，即旧的首节点和新的尾节点是同一个节点，此时会执行`patchVnode`逻辑，`patchVnode`中会执行`prePatch`，`prePatch`中会更新 props，此时我们的两个节点的`propsData`是相同的，都为`{color: '#0f0',message: '绿色'}`，这样的话`Item`组件的 props 就不会更新，`Item`也不会重新渲染。再回到`updateChildren`中，会继续执行`"移动oldStartVnode节点"`的操作，将 DOM 元素。移动到正确位置，其他节点对比也是同样的流程。
+
+可以发现，在整个流程中，**只是移动了节点，并没有触发 Item 组件的重新渲染**，这样实现了节点的复用。
+
+我们再来看下使用`index`作为 key 的情况，使用`index`时，`旧的children`是：
+
+```js
+;[
+  {
+    tag: 'Item',
+    key: 0,
+    propsData: {
+      color: '#f00',
+      message: '红色'
+    }
+  },
+  {
+    tag: 'Item',
+    key: 1,
+    propsData: {
+      color: '#0f0',
+      message: '绿色'
+    }
+  }
+]
+```
+
+执行`reverse`后的`新的children`是：
+
+```js
+;[
+  {
+    tag: 'Item',
+    key: 0,
+    propsData: {
+      color: '#0f0',
+      message: '绿色'
+    }
+  },
+  {
+    tag: 'Item',
+    key: 1,
+    propsData: {
+      color: '#f00',
+      message: '红色'
+    }
+  }
+]
+```
+
+这里和`id`作为 key 时的节点就有所不同了，虽然我们把 list 顺序颠倒了，但是 key 的顺序却没变，在`updateChildren`时`sameVnode(oldStartVnode, newStartVnode)`将会成立，即旧的首节点和新的首节点相同，此时执行`patchVnode -> prePatch -> 更新props`，这个时候旧的 propsData 是`{color: '#f00',message: '红色'}`，新的 propsData 是`{color: '#0f0',message: '绿色'}`，更新过后，Item 的 props 将会发生改变，**会触发 Item 组件的重新渲染**。
+
+这就是 index 作为 key 和 id 作为 key 时的区别，**id 作为 key 时，仅仅是移动了节点，并没有触发 Item 的重新渲染。index 作为 key 时，触发了 Item 的重新渲染**，可想而知，当 Item 是一个复杂的组件时，必然会引起性能问题。
+
+上面的流程比较复杂，涉及的也比较多，可以拆开写好几篇文章，有些地方我只是简略的说了一下，如果你不是很明白的话，你可以把上面的例子复制下来，在自己的电脑上调式，我在 Item 的渲染函数中加了打印日志和 debugger，你可以分别用 id 和 index 作为 key 尝试下，你会发现 id 作为 key 时，Item 的渲染函数没有执行，但是 index 作为 key 时，Item 的渲染函数执行了，这就是这两种方式的区别。
+
+### 延迟渲染
+
+延迟渲染就是分批渲染，假设我们某个页面里有一些组件在初始化时需要执行复杂的逻辑：
+
+```html
+<template>
+  <div>
+    <!-- Heavy组件初始化时需要执行很复杂的逻辑，执行大量计算 -->
+    <Heavy1 />
+    <Heavy2 />
+    <Heavy3 />
+    <Heavy4 />
+  </div>
+</template>
+```
+
+这将会占用很长时间，导致帧数下降、卡顿，其实可以使用分批渲染的方式来进行优化，就是先渲染一部分，再渲染另一部分：
+
+参考[黄轶](https://juejin.cn/user/2137106333044861/posts)老师[揭秘 Vue.js 九个性能优化技巧](https://juejin.cn/post/6922641008106668045#heading-5)中的代码：
+
+```js
+<template>
+  <div>
+    <Heavy v-if="defer(1)" />
+    <Heavy v-if="defer(2)" />
+    <Heavy v-if="defer(3)" />
+    <Heavy v-if="defer(4)" />
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      displayPriority: 0
+    }
+  },
+  mounted() {
+    this.runDisplayPriority()
+  },
+  methods: {
+    runDisplayPriority() {
+      const step = () => {
+        requestAnimationFrame(() => {
+          this.displayPriority++
+          if (this.displayPriority < 10) {
+            step()
+          }
+        })
+      }
+      step()
+    },
+    defer(priority) {
+      return this.displayPriority >= priority
+    }
+  }
+}
+</script>
+
+```
+
+其实原理很简单，主要是维护`displayPriority`变量，通过`requestAnimationFrame`在每一帧渲染时自增，然后我们就可以在组件上通过`v-if="defer(n)"`使`displayPriority`增加到某一值时再渲染，这样就可以避免 js 执行时间过长导致的卡顿问题了。
+
+### 使用非响应式数据
+
+在 Vue 组件初始化数据时，会递归遍历在 data 中定义的每一条数据，通过`Object.defineProperty`将数据改成响应式，这就意味着如果 data 中的数据量很大的话，在初始化时将会使用很长的时间去执行`Object.defineProperty`,也就会带来性能问题，这个时候我们可以强制使数据变为非响应式，从而节省时间，看下这个例子：
+
+```js
+<template>
+  <div>
+    <ul>
+      <li v-for="item in heavyData" :key="item.id">{{ item.name }}</li>
+    </ul>
+  </div>
+</template>
+
+<script>
+// 一万条数据
+const heavyData = Array(10000)
+  .fill(null)
+  .map((_, idx) => ({ name: 'test', message: 'test', id: idx }))
+
+export default {
+  data() {
+    return {
+      heavyData: heavyData
+    }
+  },
+  beforeCreate() {
+    this.start = Date.now()
+  },
+  created() {
+    console.log(Date.now() - this.start)
+  }
+}
+</script>
+```
+
+`heavyData`中有一万条数据，这里统计了下从`beforeCreate`到`created`经历的时间，对于这个例子而言，这个时间基本上就是初始化数据的时间。
+
+我在我个人的电脑上多次测试，这个时间一直在`40-50ms`，然后我们通过`Object.freeze()`方法，将`heavyData`变为非响应式的再试下：
+
+```js
+//...
+data() {
+  return {
+    heavyData: Object.freeze(heavyData)
+  }
+}
+//...
+```
+
+改完之后再试下，初始化数据的时间变成了`0-1ms`，快了有`40ms`，这`40ms`都是递归遍历`heavyData`执行`Object.defineProperty`的时间。
+
+实际上，不止初始化数据时有影响，你可以用上面的例子统计下从`created`到`mounted`所用的时间，在我的电脑上不使用`Object.freeze()`时，这个时间是`60-70ms`，使用`Object.freeze()`后降到了`40-50ms`，这是因为在渲染函数中读取`heavyData`中的数据时，会执行到通过`Object.defineProperty`定义的`getter`方法，Vue 在这里做了一些收集依赖的处理，肯定就会占用一些时间。
+
+那么，为什么`Object.freeze()`会有这样的效果呢？对某一对象使用`Object.freeze()`后，将不能向这个对象添加新的属性，不能删除已有属性，不能修改该对象已有属性的可枚举性、可配置性、可写性，以及不能修改已有属性的值。
+
+而 Vue 在将数据改造成响应式之前有个判断：
+
+```js
+export function observe(value, asRootData) {
+  // ...省略其他逻辑
+  if (
+    shouldObserve &&
+    !isServerRendering() &&
+    (Array.isArray(value) || isPlainObject(value)) &&
+    Object.isExtensible(value) &&
+    !value._isVue
+  ) {
+    ob = new Observer(value)
+  }
+  // ...省略其他逻辑
+}
+```
+
+这个判断条件中有一个`Object.isExtensible(value)`，这个方法是判断一个对象是否是可扩展的，由于我们使用了`Object.freeze()`，这里肯定就返回了`false`，所以就跳过了下面的过程，自然就省了很多时间。
+
+但是这样做也不是没有任何问题的，这样会导致`heavyData`下的数据都不是响应式数据，你对这些数据使用`computed`、`watch`等都不会产生效果，不过通常来说这种大量的数据都是展示用的，如果你有特殊的需求，你可以只对这种数据的某一层使用`Object.freeze()`，同时配合使用上文中的延迟渲染、函数式组件等，可以极大提升性能。
+
+### 模板编译和手写渲染函数的性能差异
+
+### 参考文章
+
+1. [还在看那些老掉牙的性能优化文章么？这些最新性能指标了解下](https://juejin.cn/post/6850037270729359367)
+2. [揭秘 Vue.js 九个性能优化技巧](https://juejin.cn/post/6922641008106668045)
+3. [Vue 应用性能优化指南](https://juejin.cn/post/6844903677262561293)
+4. [为什么 Vue 中不要用 index 作为 key？（diff 算法详解）](https://juejin.cn/post/6844904113587634184)
+5. [Vue3 Compiler 优化细节，如何手写高性能渲染函数](https://juejin.cn/post/6913855965792043021)
+6. [Vue2.6 针对插槽的性能优化](https://zhuanlan.zhihu.com/p/56260917)
+7. [聊聊 Vue.js 3.0 的模板编译优化](https://mp.weixin.qq.com/s/pRCgBzN00-46X6CW6Fk7UQ)
+8. [「前端进阶」高性能渲染十万条数据(时间分片)](https://juejin.cn/post/6844903938894872589#heading-7)
+9. [Vue 之父尤雨溪深度解读 Vue3.0 的开发思路](https://www.bilibili.com/video/BV1qC4y18721?from=search&seid=17535573854059913763)
