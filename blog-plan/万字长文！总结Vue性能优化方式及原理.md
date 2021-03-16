@@ -1,19 +1,6 @@
 ### 前言
 
-我们在使用 Vue 或其他框架的日常开发中，或多或少的都会遇到一些性能问题，尽管 Vue 内部已经帮助我们做了许多优化，但是还是有些问题是需要我们主动去避免的，我在我的日常开中，以及网上各种大佬的文章中总结了一些容易产生性能问题的场景以及针对这些问题优化的技巧，这篇文章就来探讨下，希望对你有所帮助。
-
-## 指引
-1. 使用`v-slot:slotName`，而不是`slot="slotName"`
-2. 使用计算属性
-3. 使用函数式组件
-4. 结合场景使用 v-show 和 v-if
-5. 使用 keep-alive
-6. 避免 v-for 和 v-if 同时使用
-7. 始终为 v-for 添加 key，并且不要将 index 作为的 key
-8. 延迟渲染
-9. 使用非响应式数据
-10. 模板编译中的性能优化
-
+我们在使用 Vue 或其他框架的日常开发中，或多或少的都会遇到一些性能问题，尽管 Vue 内部已经帮助我们做了许多优化，但是还是有些问题是需要我们主动去避免的。我在我的日常开中，以及网上各种大佬的文章中总结了一些容易产生性能问题的场景以及针对这些问题优化的技巧，这篇文章就来探讨下，希望对你有所帮助。
 
 ### 使用`v-slot:slotName`，而不是`slot="slotName"`
 
@@ -724,31 +711,116 @@ export function observe(value, asRootData) {
 
 实际上，不止初始化数据时有影响，你可以用上面的例子统计下从`created`到`mounted`所用的时间，在我的电脑上不使用`Object.freeze()`时，这个时间是`60-70ms`，使用`Object.freeze()`后降到了`40-50ms`，这是因为在渲染函数中读取`heavyData`中的数据时，会执行到通过`Object.defineProperty`定义的`getter`方法，Vue 在这里做了一些收集依赖的处理，肯定就会占用一些时间，由于使用了`Object.freeze()`后的数据是非响应式的，没有了收集依赖的过程，自然也就节省了性能。
 
-> 由于访问响应式数据会走到自定义getter中并收集依赖，所以平时使用时要避免频繁访问响应式数据，比如在遍历之前先将这个数据存在局部变量中，尤其是在计算属性、渲染函数中使用，关于这一点更具体的说明，你可以看黄奕老师的这篇文章：[Local variables](https://juejin.cn/post/6922641008106668045#heading-2)
+> 由于访问响应式数据会走到自定义 getter 中并收集依赖，所以平时使用时要避免频繁访问响应式数据，比如在遍历之前先将这个数据存在局部变量中，尤其是在计算属性、渲染函数中使用，关于这一点更具体的说明，你可以看黄奕老师的这篇文章：[Local variables](https://juejin.cn/post/6922641008106668045#heading-2)
 
 但是这样做也不是没有任何问题的，这样会导致`heavyData`下的数据都不是响应式数据，你对这些数据使用`computed`、`watch`等都不会产生效果，不过通常来说这种大量的数据都是展示用的，如果你有特殊的需求，你可以只对这种数据的某一层使用`Object.freeze()`，同时配合使用上文中的延迟渲染、函数式组件等，可以极大提升性能。
 
-### 模板编译和渲染函数、JSX的性能差异
+### 模板编译和渲染函数、JSX 的性能差异
 
-Vue项目不仅可以使用SFC的方式开发，也可以使用渲染函数或JSX开发，很多人认为仅仅是只是开发方式不同，却不知这些开发方式之间也有性能差异，甚至差异很大，这一节我就找些例子来说明下，希望你以后在选择开发方式时有更多衡量的标准。
+Vue 项目不仅可以使用 SFC 的方式开发，也可以使用渲染函数或 JSX 开发，很多人认为仅仅是只是开发方式不同，却不知这些开发方式之间也有性能差异，甚至差异很大，这一节我就找些例子来说明下，希望你以后在选择开发方式时有更多衡量的标准。
 
-其实Vue2模板编译中的性能优化不多，Vue3中有很多，Vue3通过编译和运行时结合的方式提升了很大的性能，但是由于本篇文章讲的是Vue2的性能优化，并且Vue2现在还是有很多人在使用，所以我就着重讲下Vue2中的模板编译优化。
+其实 Vue2 模板编译中的性能优化不多，Vue3 中有很多，Vue3 通过编译和运行时结合的方式提升了很大的性能，但是由于本篇文章讲的是 Vue2 的性能优化，并且 Vue2 现在还是有很多人在使用，所以我就挑 Vue2 模板编译中的一点来说下。
 
 #### 静态节点
 
+下面这个模板：
 
-  1. 静态节点
-  2. 插槽$stable
-  3. createElement函数的normalizeChildren方式不一样
-  4. Vue3中的模板编译优化
-     patchFlag 
-     shashapeFlag 
-     blockTree 
-     静态节点提升
+```html
+<div>你好！ <span>Hello</span></div>
+```
+
+会被编译成：
+
+```js
+function render() {
+  with (this) {
+    return _m(0)
+  }
+}
+```
+
+可以看到和普通的渲染函数是有些不一样的，下面我们来看下为什么会编译成这样的代码。
+
+Vue 的编译会经过`optimize`过程，这个过程中会标记静态节点，具体内容可以看黄奕老师写的这个文档：[Vue2 编译 - optimize 标记静态节点](https://ustbhuangyi.github.io/vue-analysis/v2/compile/optimize.html#%E6%A0%87%E8%AE%B0%E9%9D%99%E6%80%81%E8%8A%82%E7%82%B9)。
+
+在`codegen`阶段判断到静态节点的标记会走到`genStatic`的分支：
+
+```js
+function genStatic(el, state) {
+  el.staticProcessed = true
+  const originalPreState = state.pre
+  if (el.pre) {
+    state.pre = el.pre
+  }
+  state.staticRenderFns.push(`with(this){return ${genElement(el, state)}}`)
+  state.pre = originalPreState
+  return `_m(${state.staticRenderFns.length - 1}${
+    el.staticInFor ? ',true' : ''
+  })`
+}
+```
+
+这里就是生成代码的关键逻辑，这里会把渲染函数保存在`staticRenderFns`里，然后拿到当前值的下标生成`_m`函数，这就是为什么我们会得到`_m(0)`。
+
+这个`_m`其实是`renderStatic`的缩写：
+
+```js
+export function renderStatic(index, isInFor) {
+  const cached = this._staticTrees || (this._staticTrees = [])
+  let tree = cached[index]
+  if (tree && !isInFor) {
+    return tree
+  }
+  tree = cached[index] = this.$options.staticRenderFns[index].call(
+    this._renderProxy,
+    null,
+    this
+  )
+  markStatic(tree, `__static__${index}`, false)
+  return tree
+}
+
+function markStatic(tree, key) {
+  if (Array.isArray(tree)) {
+    for (let i = 0; i < tree.length; i++) {
+      if (tree[i] && typeof tree[i] !== 'string') {
+        markStaticNode(tree[i], `${key}_${i}`, isOnce)
+      }
+    }
+  } else {
+    markStaticNode(tree, key, isOnce)
+  }
+}
+
+function markStaticNode(node, key, isOnce) {
+  node.isStatic = true
+  node.key = key
+  node.isOnce = isOnce
+}
+```
+
+`renderStatic`的内部实现比较简单，先是获取到组件实例的`_staticTrees`，如果没有就创建一个，然后尝试从`_staticTrees`上获取之前缓存的节点，获取到的话就直接返回，否则就从`staticRenderFns`上获取到对应的渲染函数执行并将结果缓存到`_staticTrees`上，这样下次再进入这个函数时就会直接从缓存上返回结果。
+
+拿到节点后还会通过`markStatic`将节点打上`isStatic`等标记，标记为`isStatic`的节点会直接跳过`patchVnode`阶段，因为静态节点是不会变的，所以也没必要 patch，跳过 patch 可以节省性能。
+
+通过编译和运行时结合的方式，可以帮助我们很好的提升应用性能，这是渲染函数/JSX 很难达到的，当然不是说不能用 JSX，相比于模板，JSX 更加灵活，两者有各自的使用场景。在这里写这些是希望能给你提供一些技术选型的标准。
+
+> Vue2 的编译优化除了静态节点，还有插槽，createElement 等。
+
+#### Vue3 的模板编译优化
+
+相比于 Vue2，Vue3 中的模板编译优化更加突出，性能提升的更多，由于涉及的比较多，本篇文章写不下，如果你感兴趣的话你可以看看这些文章：[Vue3 Compiler 优化细节，如何手写高性能渲染函数](https://juejin.cn/post/6913855965792043021)，[聊聊 Vue.js 3.0 的模板编译优化](https://mp.weixin.qq.com/s/pRCgBzN00-46X6CW6Fk7UQ)，以及尤雨溪的解读视频：[Vue 之父尤雨溪深度解读 Vue3.0 的开发思路](https://www.bilibili.com/video/BV1qC4y18721?from=search&seid=17535573854059913763)，以后我也会单独写一些文章分析Vue3的模板编译优化。
+
 
 ### 总结
 
-### 文章推荐
+希望你能通过这篇文章了解一些常见的Vue性能优化方式并理解其背后的原理，在日常开发中不仅要能写出代码，还要能知道这样写的好处/坏处是什么，避免写出容易产生性能问题的代码。
+
+这篇文章的内容并不是全部的优化方式。除了文章涉及的这些，还有打包优化、异步加载，懒加载等等。性能优化并不是一下子就完成的，需要你结合项目分析出性能瓶颈，找到问题并解决，在这个过程中，你肯定能发掘出更多优化方式。
+
+最后，这篇文章写了很长时间，花费了很多精力，如果你觉得对你有帮助的话，麻烦点个赞⭐，支持下，感谢！
+
+### 相关推荐
 
 以下是本文有参考或者相关的文章：
 
@@ -756,8 +828,20 @@ Vue项目不仅可以使用SFC的方式开发，也可以使用渲染函数或JS
 2. [揭秘 Vue.js 九个性能优化技巧](https://juejin.cn/post/6922641008106668045)
 3. [Vue 应用性能优化指南](https://juejin.cn/post/6844903677262561293)
 4. [为什么 Vue 中不要用 index 作为 key？（diff 算法详解）](https://juejin.cn/post/6844904113587634184)
-5. [Vue3 Compiler 优化细节，如何手写高性能渲染函数](https://juejin.cn/post/6913855965792043021)
-6. [Vue2.6 针对插槽的性能优化](https://zhuanlan.zhihu.com/p/56260917)
-7. [聊聊 Vue.js 3.0 的模板编译优化](https://mp.weixin.qq.com/s/pRCgBzN00-46X6CW6Fk7UQ)
-8. [「前端进阶」高性能渲染十万条数据(时间分片)](https://juejin.cn/post/6844903938894872589#heading-7)
-9. [Vue 之父尤雨溪深度解读 Vue3.0 的开发思路](https://www.bilibili.com/video/BV1qC4y18721?from=search&seid=17535573854059913763)
+5. [Vue2 编译 - optimize 标记静态节点](https://ustbhuangyi.github.io/vue-analysis/v2/compile/optimize.html#%E6%A0%87%E8%AE%B0%E9%9D%99%E6%80%81%E8%8A%82%E7%82%B9)
+6. [Vue3 Compiler 优化细节，如何手写高性能渲染函数](https://juejin.cn/post/6913855965792043021)
+7. [Vue2.6 针对插槽的性能优化](https://zhuanlan.zhihu.com/p/56260917)
+8. [聊聊 Vue.js 3.0 的模板编译优化](https://mp.weixin.qq.com/s/pRCgBzN00-46X6CW6Fk7UQ)
+9. [「前端进阶」高性能渲染十万条数据(时间分片)](https://juejin.cn/post/6844903938894872589#heading-7)
+10. [Vue 之父尤雨溪深度解读 Vue3.0 的开发思路](https://www.bilibili.com/video/BV1qC4y18721?from=search&seid=17535573854059913763)
+
+以下是可以实时查看编译结果的工具：
+
+1. [Vue2 Template Explorer](https://template-explorer.vuejs.org/)
+2. [Vue3 Template Explorer](https://vue-next-template-explorer.netlify.app/)
+
+
+
+* * *
+最后再求个赞⭐，感谢~
+   
