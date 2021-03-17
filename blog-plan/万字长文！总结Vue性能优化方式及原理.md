@@ -261,8 +261,7 @@ function render() {
   }
 }
 ```
-
-实际上，v-show 是一个 Vue 内部的指令，在这个指令的代码中，主要执行了以下逻辑：
+`v-show`被编译成了`directives`，实际上，v-show 是一个 Vue 内部的指令，在这个指令的代码中，主要执行了以下逻辑：
 
 ```js
 el.style.display = value ? el.__vOriginalDisplay : 'none'
